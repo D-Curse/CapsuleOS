@@ -1,0 +1,21 @@
+version: "3"
+
+services:
+
+  api:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../images:/images
+      - ../containers:/containers
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    privileged: true
+
+  runtime:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.runtime
+    privileged: true
