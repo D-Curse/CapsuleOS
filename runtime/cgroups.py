@@ -23,3 +23,10 @@ def join_cgroups(cid):
 
     with open(f"{cgroup_path}/cgroup.procs", "w") as f:
         f.write(str(os.getpid()))
+        
+def cleanup_cgroups(cid):
+    cgroup_path = f"{CGROUP_BASE}/mini_{cid}"
+    try:
+        os.rmdir(cgroup_path)
+    except FileNotFoundError:
+        pass
