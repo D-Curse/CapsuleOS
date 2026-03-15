@@ -14,8 +14,8 @@ services:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
     privileged: true
 
-  runtime:
-    build:
-      context: ../
-      dockerfile: docker/Dockerfile.runtime
-    privileged: true
+  # runtime:
+  #   build:
+  #     context: ../
+  #     dockerfile: docker/Dockerfile.runtime
+  #   privileged: true

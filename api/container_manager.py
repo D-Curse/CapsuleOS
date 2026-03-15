@@ -35,7 +35,8 @@ class ContainerManager:
     
     def start(self, cid):
         container = Container.load(cid)
-        pid = runtime.start({
+    
+        pid, container_ip = runtime.start({
             "id": container.id,
             "image": container.image,
             "command": container.command,
@@ -43,7 +44,8 @@ class ContainerManager:
             "memory": container.memory
         })
         
-        container.pid = pid
+        container.pid = int(pid)
+        container.ip = container_ip
         container.status = "running"
         container.save()
         

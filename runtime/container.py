@@ -14,6 +14,7 @@ class Container:
         self.memory = memory
         self.pid = None
         self.status = "created"
+        self.ip = None
         
     def config_path(self):
         return f"{CONTAINER_DIR}/{self.id}/config.json"
@@ -30,7 +31,8 @@ class Container:
             "cpu": self.cpu,
             "memory": self.memory,
             "pid": self.pid,
-            "status": self.status
+            "status": self.status,
+            "ip": self.ip
         }
         
         with open(self.config_path(), "w") as f:
@@ -57,13 +59,22 @@ class Container:
         
         c.pid = data["pid"]
         c.status = data["status"]
+        c.ip = data.get("ip")
         
         return c
     
     def stop(self):
         if self.pid:
-            os.kill(self.pid, 15)
+            pid = self.pid
+            if isinstance(pid, list):
+                pid = pid[0]
+            pid = int(pid)
+            try:
+                os.kill(pid, 15)
+            except ProcessLookupError:
+                pass  
             self.status = "stopped"
+            self.pid = pid
             self.save()
             
     def delete(self):

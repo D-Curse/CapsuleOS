@@ -1,10 +1,23 @@
 from fastapi import FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from .container_manager import manager
 from .schemas import ContainerCreate
 from .stats import get_container_stats
-from .websocket import stats_stream, log_stream
+from .websocket import stats_stream, log_stream, exec_stream
+from runtime.network import setup_bridge
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],        
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.on_event("startup")
+def startup():
+    setup_bridge()
 
 @app.post("/container/create")
 def create_container(req: ContainerCreate):
@@ -37,3 +50,7 @@ async def ws_status(ws: WebSocket, cid: str):
 @app.websocket("/ws/{cid}/logs")
 async def ws_logs(ws: WebSocket, cid: str):
     await log_stream(ws, cid)
+    
+@app.websocket("/ws/{cid}/exec")
+async def ws_exec(ws: WebSocket, cid: str):
+    await exec_stream(ws, cid)

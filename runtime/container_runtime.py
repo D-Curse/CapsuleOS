@@ -5,6 +5,7 @@ import signal
 from .namespaces import setup_namespaces
 from .cgroups import create_cgroups, join_cgroups, cleanup_cgroups
 from .filesystem import setup_rootfs
+from .network import allocate_ip, setup_container_network, teardown_container_network
 
 BASE_DIR = "/containers"
 
@@ -23,60 +24,59 @@ signal.signal(signal.SIGCHLD, reap_children)
 class ContainerRuntime:
 
     def create(self, image, command, cpu, memory):
-
         cid = uuid.uuid4().hex[:12]
         container_dir = f"{BASE_DIR}/{cid}"
-
         os.makedirs(container_dir, exist_ok=True)
 
-        rootfs = setup_rootfs(image, container_dir)
-        if not os.path.exists(rootfs):
-            raise Exception("rootfs creation failed")
+        # Just create the dirs, don't mount yet
+        upper  = f"{container_dir}/upper"
+        work   = f"{container_dir}/work"
+        merged = f"{container_dir}/rootfs"
+        for d in [upper, work, merged]:
+            os.makedirs(d, exist_ok=True)
 
-        config = {
-            "id": cid,
-            "image": image,
-            "command": command,
-            "cpu": cpu,
-            "memory": memory,
-            "status": "created"
+        return {
+            "id": cid, "image": image, "command": command,
+            "cpu": cpu, "memory": memory, "status": "created"
         }
 
-        return config
-
     def start(self, config):
-
-        cid = config["id"]
-        cpu = config["cpu"]
+        cid    = config["id"]
+        cpu    = config["cpu"]
         memory = config["memory"]
+        image  = config["image"]
 
-        rootfs = f"{BASE_DIR}/{cid}/rootfs"
-        log_file = f"{BASE_DIR}/{cid}/logs.txt"
-
-        if not os.path.exists(rootfs):
-            raise Exception("rootfs does not exist")
+        container_dir = f"{BASE_DIR}/{cid}"
+        rootfs        = f"{container_dir}/rootfs"
+        log_file      = f"{container_dir}/logs.txt"
 
         create_cgroups(cid, cpu, memory)
-        
         log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
         pid = os.fork()
-                
+
         if pid == 0:
             try:
                 signal.signal(signal.SIGCHLD, signal.SIG_DFL)
-                
-                
-                # Open log file BEFORE chroot, while host paths are still valid
-                # log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+
                 os.dup2(log_fd, 1)
                 os.dup2(log_fd, 2)
                 os.close(log_fd)
-                
+
+                # 1. Enter new namespaces (creates new mount namespace)
                 setup_namespaces()
                 join_cgroups(cid)
 
+                # 2. Mount overlay INSIDE the new mount namespace
+                #    Now this mount is private to the container
+                image_path = f"/images/{image}"
+                upper      = f"{container_dir}/upper"
+                work       = f"{container_dir}/work"
+                mount_opts = f"lowerdir={image_path},upperdir={upper},workdir={work}"
+                ret = os.system(f"mount -t overlay overlay -o {mount_opts} {rootfs} 2>/containers/{cid}/mount_error.txt")
+                if ret != 0:
+                    raise Exception("overlay mount failed")
 
-                # Now safe to chroot — stdout/stderr are already redirected to host fd
+                # 3. Now chroot into the freshly mounted overlay
                 os.chroot(rootfs)
                 os.chdir("/")
 
@@ -85,16 +85,14 @@ class ContainerRuntime:
                 os.execvp(config["command"][0], config["command"])
 
             except Exception as e:
-
-                error_file = f"{BASE_DIR}/{cid}/runtime_error.txt"
-
-                with open(error_file, "w") as f:
+                with open(f"{container_dir}/runtime_error.txt", "w") as f:
                     f.write(str(e))
-
                 os._exit(1)
-        os.close(log_fd)
 
-        return pid
+        os.close(log_fd)
+        container_ip = allocate_ip()
+        setup_container_network(cid, pid, container_ip)
+        return pid, container_ip
     
     def stop(self, pid, cid):
         try:
@@ -118,4 +116,5 @@ class ContainerRuntime:
         except ProcessLookupError:
             pass
         finally:
+            teardown_container_network(cid)
             cleanup_cgroups(cid)
